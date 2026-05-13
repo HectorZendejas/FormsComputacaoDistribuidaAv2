@@ -1,0 +1,132 @@
+version: "3.9"
+
+services:
+
+  # ──────────────────────────────────────────────
+  # Product Page  (Python)
+  # Can reach: reviews-v1, reviews-v2, reviews-v3, details
+  # Cannot reach: ratings  (no network in common with ratings-net)
+  # ──────────────────────────────────────────────
+  productpage:
+    image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.0
+    container_name: productpage
+    ports:
+      - "9080:9080"
+    environment:
+      - DETAILS_HOSTNAME=details
+      - REVIEWS_HOSTNAME=reviews-v1   # round-robin via env vars or DNS alias
+    networks:
+      - frontend-net
+      - reviews-net
+      - details-net
+    depends_on:
+      - reviews-v1
+      - reviews-v2
+      - reviews-v3
+      - details
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  # ──────────────────────────────────────────────
+  # Reviews  (Java) — three versions
+  # Can reach: ratings
+  # ──────────────────────────────────────────────
+  reviews-v1:
+    image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.0   # Java, no stars
+    container_name: reviews-v1
+    environment:
+      - RATINGS_HOSTNAME=ratings
+      - RATINGS_PORT=9080
+    networks:
+      - reviews-net
+      - ratings-net
+    depends_on:
+      - ratings
+
+  reviews-v2:
+    image: docker.io/istio/examples-bookinfo-reviews-v2:1.20.0   # Java, black stars
+    container_name: reviews-v2
+    environment:
+      - RATINGS_HOSTNAME=ratings
+      - RATINGS_PORT=9080
+    networks:
+      - reviews-net
+      - ratings-net
+    depends_on:
+      - ratings
+
+  reviews-v3:
+    image: docker.io/istio/examples-bookinfo-reviews-v3:1.20.0   # Java, red stars
+    container_name: reviews-v3
+    environment:
+      - RATINGS_HOSTNAME=ratings
+      - RATINGS_PORT=9080
+    networks:
+      - reviews-net
+      - ratings-net
+    depends_on:
+      - ratings
+
+  # ──────────────────────────────────────────────
+  # Details  (Ruby)
+  # No access to ratings (not on ratings-net)
+  # ──────────────────────────────────────────────
+  details:
+    image: docker.io/istio/examples-bookinfo-details-v1:1.20.0   # Ruby
+    container_name: details
+    networks:
+      - details-net
+
+  # ──────────────────────────────────────────────
+  # Ratings  (Node.js)
+  # Reachable only by reviews-v*
+  # ──────────────────────────────────────────────
+  ratings:
+    image: docker.io/istio/examples-bookinfo-ratings-v1:1.20.0   # Node.js
+    container_name: ratings
+    networks:
+      - ratings-net
+
+  # ──────────────────────────────────────────────
+  # Locust — load generator
+  # Targets only the Product Page (port 9080)
+  # ──────────────────────────────────────────────
+  locust:
+    image: locustio/locust:2.24.0
+    container_name: locust
+    ports:
+      - "8089:8089"     # Locust Web UI
+    volumes:
+      - ./locustfile.py:/mnt/locust/locustfile.py:ro
+    command: >
+      -f /mnt/locust/locustfile.py
+      --host http://productpage:9080
+      --web-port 8089
+    networks:
+      - frontend-net   # same network as productpage — cannot reach ratings directly
+    depends_on:
+      - productpage
+
+# ──────────────────────────────────────────────
+# Networks
+#
+#  frontend-net  : external requests → productpage
+#  reviews-net   : productpage ↔ reviews-v*
+#  details-net   : productpage ↔ details
+#  ratings-net   : reviews-v* ↔ ratings
+#
+# productpage is NOT on ratings-net, so it cannot reach ratings.
+# Locust is only on frontend-net, so it also cannot reach ratings.
+# ──────────────────────────────────────────────
+networks:
+  frontend-net:
+    driver: bridge
+  reviews-net:
+    driver: bridge
+  details-net:
+    driver: bridge
+  ratings-net:
+    driver: bridge
