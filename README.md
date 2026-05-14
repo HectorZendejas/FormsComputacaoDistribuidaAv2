@@ -1,94 +1,122 @@
 # FormsCompDistri
 
-Projeto de exemplo para executar a aplicação Istio Bookinfo em Docker Compose e testar carga com Locust.
+Projeto de exemplo que implementa a arquitetura apresentada na imagem usando Docker Compose e Locust.
 
-## Descrição
+## Como foi feito
 
-Este repositório contém um `docker-compose.yml` que orquestra os serviços da aplicação Bookinfo e um `locustfile.py` para executar testes de carga contra o serviço `productpage`.
+O `docker-compose.yml` modela a aplicação Bookinfo como uma arquitetura de microserviços:
 
-O objetivo é validar o comportamento da aplicação distribuída e gerar métricas de desempenho usando Locust.
+- `productpage` representa a página de compras (frontend Python)
+- `reviews-v1`, `reviews-v2`, `reviews-v3` representam os serviços de avaliação (Java)
+- `details` representa o serviço de detalhes do produto (Ruby)
+- `ratings` representa o serviço de notas/ratings (Node.js)
+- `locust` é o gerador de carga para testar apenas o `productpage`
 
-## Serviços
+A separação de redes foi definida para respeitar as regras de acesso da imagem:
 
-- `productpage` - front-end do Bookinfo
-- `reviews-v1`, `reviews-v2`, `reviews-v3` - serviços de avaliações
-- `details` - serviço de detalhes do produto
-- `ratings` - serviço de classificação
-- `locust` - gerador de carga para a página de produto
+- `frontend-net` conecta `productpage` e `locust`
+- `reviews-net` conecta `productpage` a `reviews-v*`
+- `details-net` conecta `productpage` a `details`
+- `ratings-net` conecta `reviews-v*` a `ratings`
 
-## Requisitos
+Com isso:
 
-- Docker
-- Docker Compose
-- Acesso à internet para baixar imagens do Docker Hub
+- `productpage` consegue acessar `reviews-v1`, `reviews-v2`, `reviews-v3` e `details`
+- `reviews-v*` conseguem acessar `ratings`
+- `details` não acessa `ratings`
+- `locust` ataca apenas o `productpage`
 
-## Como executar
+## Imagens utilizadas
+
+As imagens de container são as mesmas indicadas no enunciado:
+
+- `docker.io/istio/examples-bookinfo-productpage-v1:1.20.0`
+- `docker.io/istio/examples-bookinfo-reviews-v1:1.20.0`
+- `docker.io/istio/examples-bookinfo-reviews-v2:1.20.0`
+- `docker.io/istio/examples-bookinfo-reviews-v3:1.20.0`
+- `docker.io/istio/examples-bookinfo-details-v1:1.20.0`
+- `docker.io/istio/examples-bookinfo-ratings-v1:1.20.0`
+- `locustio/locust:2.24.0`
+
+## Como usar
 
 1. Abra um terminal na pasta do projeto.
-2. Inicie os serviços:
+2. Suba os serviços:
 
 ```powershell
 docker compose up -d
 ```
 
-3. Verifique os containers:
+3. Verifique se os containers estão ativos:
 
 ```powershell
 docker compose ps
 ```
 
-4. Acesse o Locust no navegador:
+4. Acesse o painel do Locust em:
 
 ```text
 http://localhost:8089
 ```
 
-5. Inicie o teste de carga configurando o host como:
+5. No Locust, configure o host como:
 
 ```text
 http://productpage:9080
 ```
 
-## Locust
+6. Defina o número de usuários e a taxa de spawn. Em seguida, inicie o teste.
 
-O `locustfile.py` define um usuário virtual `ProductPageUser` com três tarefas:
+## Como o Locust foi configurado
+
+O arquivo `locustfile.py` cria um usuário virtual `ProductPageUser` com estas tarefas:
 
 - `GET /productpage` (peso 5)
 - `GET /productpage?u=normal` (peso 2)
 - `GET /health` (peso 1)
 
-O foco do teste é medir:
+Isso simula uma carga onde o acesso à página principal é o mais frequente, e o health check também é monitorado.
 
-- RPS (requests por segundo)
-- tempos de resposta (p50, p95, p99)
-- taxa de erros
-- comportamento sob aumento de usuários
+## Métricas importantes
 
-## Observações
+Durante o teste de carga, use o Locust para observar:
 
-- O arquivo `docker-compose.yml` usa sintaxe do Compose V2 e a chave `version` é obsoleta. O Compose atual a ignora, mas é recomendado removê-la do arquivo.
-- Caso haja falha no pull das imagens do Docker Hub, execute novamente ou faça login com:
+- Requests por segundo (RPS)
+- Tempo de resposta médio e percentis (`p50`, `p95`, `p99`)
+- Taxa de falhas (HTTP 4xx/5xx)
+- Número de usuários ativos
+- Curva de RPS versus usuários, para detectar saturação
 
-```powershell
-docker login
-```
+### Ponto de saturação
 
-## Problemas comuns
+O serviço está saturado quando:
 
-- `failed to fetch oauth token` / `status 522`: pode ser um problema temporário de autenticação do Docker Hub.
-- Se um serviço não subir, use:
+- RPS para de crescer ou diminui com mais usuários
+- latência `p95` aumenta fortemente
+- taxa de erros sobe acima de 1–2%
 
-```powershell
-docker compose logs <servico>
-```
+## Comandos úteis
 
-- Para parar e remover containers:
+- Parar e remover containers:
 
 ```powershell
 docker compose down
 ```
 
-## Arquivos principais
+- Ver logs de um serviço:
 
-- `docker-compose.yml` - configuração dos serviços e redes
-- `locustfile.py` - definição do cenário de carga Locust
+```powershell
+docker compose logs <servico>
+```
+
+- Fazer login no Docker Hub se o pull falhar:
+
+```powershell
+docker login
+```
+
+## Observações
+
+O compose define redes específicas para garantir os acessos do diagrama. Essa configuração foi feita propositalmente para corresponder à arquitetura pedida na imagem.
+
+Se o Docker Hub retornar erro de autenticação temporária (`failed to fetch oauth token`, `status 522`), aguarde alguns minutos e tente novamente.
